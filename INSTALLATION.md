@@ -1,0 +1,346 @@
+# Installation Guide
+
+This guide provides detailed instructions for installing and configuring the Humifortis Keycloak Connector.
+
+## Prerequisites
+
+- Keycloak 22.x, 23.x, or 24.x
+- Java 17 or later
+- Access to Keycloak server filesystem
+- Humifortis SaaS account
+
+## Step 1: Register Connector in Humifortis SaaS
+
+1. Navigate to [https://humifortis.educosmic.tech](https://humifortis.educosmic.tech)
+2. Login with your credentials
+3. Go to **Connectors** → **Add Connector**
+4. Fill in the connector details:
+   - **Connector Name:** Production Keycloak (or your preferred name)
+   - **Connector Type:** Keycloak
+   - **Environment:** Production (or Staging/Development)
+   - **Tags:** (optional) prod, eu-west-1, auth, etc.
+5. Click **Create Connector**
+6. **Copy the generated API key** - you'll need this in Step 2
+
+Example API key format: `humi_kc_prod_a1b2c3d4e5f6g7h8i9j0`
+
+## Step 2: Download and Install Connector
+
+### Option A: Download Pre-built JAR
+
+```bash
+# Download the latest release
+wget https://github.com/humifortis/keycloak-connector/releases/latest/download/humifortis-keycloak-connector.jar
+
+# Copy to Keycloak providers directory
+sudo cp humifortis-keycloak-connector.jar /opt/keycloak/providers/
+```
+
+### Option B: Build from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/humifortis/keycloak-connector.git
+cd humifortis-keycloak-connector
+
+# Build with Maven
+mvn clean package
+
+# Copy to Keycloak providers directory
+sudo cp target/humifortis-keycloak-connector.jar /opt/keycloak/providers/
+```
+
+## Step 3: Configure Environment Variables
+
+Set the required environment variables. The method depends on how you run Keycloak:
+
+### For Systemd Service
+
+Edit the systemd service file:
+
+```bash
+sudo nano /etc/systemd/system/keycloak.service
+```
+
+Add these lines in the `[Service]` section:
+
+```ini
+[Service]
+Environment="HUMIFORTIS_API_URL=https://api.humifortis.educosmic.tech"
+Environment="HUMIFORTIS_API_KEY=humi_kc_prod_a1b2c3d4e5f6..."
+Environment="HUMIFORTIS_TIMEOUT_MS=5000"
+Environment="HUMIFORTIS_FALLBACK_ALLOW=true"
+```
+
+Reload systemd:
+
+```bash
+sudo systemctl daemon-reload
+```
+
+### For Docker/Podman
+
+Add environment variables to your docker-compose.yml:
+
+```yaml
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    environment:
+      - HUMIFORTIS_API_URL=https://api.humifortis.educosmic.tech
+      - HUMIFORTIS_API_KEY=humi_kc_prod_a1b2c3d4e5f6...
+      - HUMIFORTIS_TIMEOUT_MS=5000
+      - HUMIFORTIS_FALLBACK_ALLOW=true
+    volumes:
+      - ./humifortis-keycloak-connector.jar:/opt/keycloak/providers/humifortis-keycloak-connector.jar
+```
+
+Or via command line:
+
+```bash
+docker run -e HUMIFORTIS_API_KEY=humi_kc_prod_a1b2c3d4e5f6... \
+  -e HUMIFORTIS_API_URL=https://api.humifortis.educosmic.tech \
+  -v ./humifortis-keycloak-connector.jar:/opt/keycloak/providers/humifortis-keycloak-connector.jar \
+  quay.io/keycloak/keycloak:23.0 start
+```
+
+### For Kubernetes
+
+Create a ConfigMap or Secret:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: humifortis-config
+type: Opaque
+stringData:
+  HUMIFORTIS_API_KEY: humi_kc_prod_a1b2c3d4e5f6...
+  HUMIFORTIS_API_URL: https://api.humifortis.educosmic.tech
+```
+
+Reference in your deployment:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+spec:
+  template:
+    spec:
+      containers:
+      - name: keycloak
+        image: quay.io/keycloak/keycloak:23.0
+        envFrom:
+        - secretRef:
+            name: humifortis-config
+```
+
+### For Manual Start Script
+
+Add to your start script or profile:
+
+```bash
+export HUMIFORTIS_API_URL=https://api.humifortis.educosmic.tech
+export HUMIFORTIS_API_KEY=humi_kc_prod_a1b2c3d4e5f6...
+export HUMIFORTIS_TIMEOUT_MS=5000
+export HUMIFORTIS_FALLBACK_ALLOW=true
+```
+
+## Step 4: Build and Restart Keycloak
+
+### Standard Installation
+
+```bash
+# Build Keycloak with the new provider
+/opt/keycloak/bin/kc.sh build
+
+# Start Keycloak
+/opt/keycloak/bin/kc.sh start
+```
+
+### With Systemd
+
+```bash
+sudo systemctl restart keycloak
+```
+
+### With Docker
+
+```bash
+docker-compose down
+docker-compose up -d
+```
+
+## Step 5: Enable Event Listener
+
+1. Login to Keycloak Admin Console
+2. Select your realm (or create a new one)
+3. Navigate to: **Realm Settings** → **Events** tab
+4. Scroll to **Event Listeners**
+5. Click the dropdown and select: **humifortis-event-listener**
+6. Click **Save**
+
+You should now see "humifortis-event-listener" in the enabled listeners list.
+
+## Step 6: Configure Authentication Flow
+
+### Add RBA Authenticator to Browser Flow
+
+1. Navigate to: **Authentication** → **Flows** tab
+2. Select the **Browser** flow (or create a copy)
+3. Click **Add step**
+4. Find and select: **Humifortis Risk-Based Authentication**
+5. Click **Add**
+6. Move the authenticator to be **after "Username Password Form"**
+7. Set the **Requirement** to **REQUIRED**
+8. Click **Save**
+
+Your flow should look like this:
+
+```
+Browser Flow:
+├── Cookie (ALTERNATIVE)
+├── Kerberos (DISABLED)
+└── Identity Provider Redirector (ALTERNATIVE)
+└── Forms (ALTERNATIVE)
+    ├── Username Password Form (REQUIRED)
+    ├── Humifortis Risk-Based Authentication (REQUIRED)  ← New
+    └── Browser - Conditional OTP (CONDITIONAL)
+```
+
+## Step 7: Test the Installation
+
+### Test Event Listener
+
+1. Open an incognito/private browser window
+2. Navigate to your Keycloak login page
+3. Attempt a login (success or failure)
+4. Go to the Humifortis SaaS dashboard
+5. Navigate to **Events** or **Dashboard**
+6. Verify that the login event appears
+
+### Test RBA Authenticator
+
+1. In Humifortis SaaS, create a test policy:
+   - Go to **Policies** → **Risk-Based Authentication**
+   - Set a low threshold to trigger MFA: Risk 30-100 → CHALLENGE_MFA
+2. Attempt a login in Keycloak
+3. Verify the RBA check occurs (check Keycloak logs if needed)
+
+## Step 8: Verify Installation
+
+### Check Keycloak Logs
+
+```bash
+# View recent logs
+tail -f /opt/keycloak/data/log/keycloak.log
+
+# Look for these messages:
+# [HumifortisEventListener] Humifortis Event Listener initialized successfully
+# [HumifortisRBAAuthenticator] Humifortis RBA Authenticator initialized
+```
+
+### Check SaaS Dashboard
+
+1. Login to Humifortis SaaS
+2. Go to **Connectors**
+3. Find your Keycloak connector
+4. Verify:
+   - ✓ Status is "Healthy"
+   - ✓ Last heartbeat is recent
+   - ✓ Events are being received
+
+## Troubleshooting
+
+### Connector Not Showing Up
+
+**Problem:** The connector doesn't appear in Keycloak admin console
+
+**Solution:**
+1. Verify JAR is in `/opt/keycloak/providers/`
+2. Check file permissions: `sudo chmod 644 /opt/keycloak/providers/humifortis-keycloak-connector.jar`
+3. Rebuild: `/opt/keycloak/bin/kc.sh build`
+4. Check logs for errors during startup
+
+### API Key Errors
+
+**Problem:** Logs show "Required environment variable not set: HUMIFORTIS_API_KEY"
+
+**Solution:**
+1. Verify environment variable is set: `echo $HUMIFORTIS_API_KEY`
+2. Ensure it's available to the Keycloak process
+3. For systemd, verify the Environment lines in the service file
+4. Restart Keycloak after setting variables
+
+### Connection Errors
+
+**Problem:** Logs show "Failed to send event to Humifortis SaaS"
+
+**Solution:**
+1. Test connectivity: `curl -H "X-API-Key: $HUMIFORTIS_API_KEY" https://api.humifortis.educosmic.tech/v1/health`
+2. Check firewall rules allow outbound HTTPS
+3. Verify API key is correct
+4. Check SaaS status page
+
+### Events Not Appearing
+
+**Problem:** Events aren't showing in SaaS dashboard
+
+**Solution:**
+1. Verify event listener is enabled in Realm Settings
+2. Check that monitored events are being triggered (e.g., LOGIN)
+3. Review Keycloak logs for event sending errors
+4. Ensure API key has correct permissions in SaaS
+
+### RBA Not Enforcing
+
+**Problem:** Logins succeed even with high risk scores
+
+**Solution:**
+1. Verify RBA authenticator is in the Browser flow
+2. Check it's placed **after** Username Password Form
+3. Ensure Requirement is set to **REQUIRED** not DISABLED
+4. Check logs for decision query failures
+5. Verify policies are configured in SaaS
+
+## Configuration Reference
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `HUMIFORTIS_API_URL` | No | `https://api.humifortis.educosmic.tech` | SaaS API endpoint |
+| `HUMIFORTIS_API_KEY` | **Yes** | - | API key from connector registration |
+| `HUMIFORTIS_TIMEOUT_MS` | No | `5000` | HTTP timeout in milliseconds |
+| `HUMIFORTIS_FALLBACK_ALLOW` | No | `true` | Allow access if SaaS unreachable |
+
+### Monitored Events
+
+The connector monitors these Keycloak events:
+
+- LOGIN, LOGIN_ERROR
+- LOGOUT
+- REGISTER
+- UPDATE_PASSWORD, RESET_PASSWORD, RESET_PASSWORD_ERROR
+- UPDATE_EMAIL
+- UPDATE_TOTP, REMOVE_TOTP
+- CODE_TO_TOKEN_ERROR, REFRESH_TOKEN_ERROR
+
+## Next Steps
+
+After installation:
+
+1. **Configure Policies** in Humifortis SaaS dashboard
+2. **Set thresholds** for ALLOW/CHALLENGE_MFA/BLOCK actions
+3. **Create custom rules** for specific scenarios
+4. **Monitor the dashboard** for security events
+5. **Adjust policies** based on real-world usage
+
+## Support
+
+For assistance:
+- Email: support@humifortis.tech
+- Documentation: https://docs.humifortis.tech/connectors/keycloak
+- GitHub Issues: https://github.com/humifortis/keycloak-connector/issues
